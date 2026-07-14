@@ -1,5 +1,7 @@
+import math
 import os
 from re import S
+import re
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -203,7 +205,138 @@ def display_conversation(history):
 
     print("=" * 60 + "\n")
 
+
 def parse_action(action_str):
     """解析行动字符串"""
-    if action_str.startswitch("Finish"):
-        
+    if action_str.startswith("Finish"):
+        match = re.match(r"\w+\[(.*)\]", action_str)
+        if match:
+            return "finish", {"answer": match.group(1)}
+        return "finish", {"answer": "任务完成"}
+
+    tool_name_match = re.search(r"(\w+)\(", action_str)
+    if not tool_name_match:
+        return None, {}
+
+    tool_name = tool_name_match.group(1)
+    args_match = re.search(r"\((.*)\)", action_str)
+    if args_match:
+        args_str = args_match.group(1)
+        kwargs = dict(re.findall(r'(\w+)="([^"]*)"', args_str))
+    else:
+        kwargs = {}
+
+    return tool_name, kwargs
+
+
+def run_assistant(user_input, max_iterations=5, display=True):
+    """
+    运行旅行助手的主函数
+
+    Args:
+        user_input: 用户输入的问题
+        max_iterations: 最大循环次数
+        display: 是否显示对话历史
+
+    Returns:
+        tuple: (最终答案, 完整的对话历史)
+    """
+
+    assistant = TravelAssistant()
+    assistant.add_user_message(user_input)
+
+    if display:
+        print(f"👤 用户输入: {user_input}")
+        print("=" * 50)
+
+    for i in range(max_iterations):
+        if display:
+            print(f"\n🔄 循环{i + 1}/{max_iterations}")
+
+        # 构建完整prompt并调用LLM
+        full_prompt = "\n".join(assistant.prompt_history)
+        llm_output = assistant.llm.generate(full_prompt, AGENT_SYSTEM_PROMPT)
+        # 模型可能输出多余的Thought-Action, 需要截断
+        match = re.search(
+            r"(Thought:.*?Action:.*?)(?=\n\s*(?:Thought:|Action:|Observation:)|\Z)",
+            llm_output,
+            re.DOTALL,
+        )
+        if match:
+            truncated = match.group(1).strip()
+            if truncated != llm_output.strip():
+                llm_output = truncated
+                print("⚠️ 已截断多余的 Thought-Action 对")
+
+        assistant.add_assistant_message(llm_output)
+
+        if display:
+            print(f"🤖 模型输出:\n{llm_output}")
+
+        # 解析行动
+        action_match = re.search(r"Action: (.*)", llm_output, re.DOTALL)
+        if not action_match:
+            observation = "错误: 未能解析到 Action 字段. 请确保你的回复严格遵守 'Throught: ... Action: ...' 的格式."
+            print(f"Observation: {observation}\n" + "=" * 40)
+            assistant.add_observation(observation)
+            continue
+
+        action_str = action_match.group(1).strip()
+        tool_name, kwargs = parse_action(action_str)
+
+        # 处理完成行动
+        if tool_name == "finish":
+            final_answer = kwargs.get("answer", "任务完成")  # type: ignore
+            if display:
+                print(f"🎉 任务完成!")
+                print(f"📋 最终答案: {final_answer}")
+            return final_answer, assistant.prompt_history
+
+        # 处理工具调用
+        if tool_name in available_tools:
+            if display:
+                print(f"🛠️  调用工具: {tool_name}({kwargs})")
+            observation = available_tools[tool_name](**kwargs)
+        else:
+            observation = f"错误: 未定义的工具 '{tool_name}'"
+
+        # 记录观察结果
+        if display:
+            print(f"📊 观察结果: {observation}")
+            print("=" * 50)
+
+        assistant.add_observation(observation)
+
+    # 如果达到最大循环次数仍未完成
+    timeout_answer = (
+        "抱歉，经过多次尝试仍未完成您的请求。请尝试简化您的问题或稍后重试。"
+    )
+    if display:
+        print(f"⏰ 达到最大循环次数: {timeout_answer}")
+
+    return timeout_answer, assistant.prompt_history
+
+
+# 测试示例
+def test_basic_example():
+    """测试上海天气+景点推荐的示例"""
+    print("🚀 开始测试上海天气+景点推荐示例")
+    user_input = (
+        "你好，请帮我查询一下今天上海的天气，然后根据天气推荐一个合适的旅游景点。"
+    )
+
+    final_answer, history = run_assistant(user_input, display=True)
+
+    print("\n" + "=" * 60)
+    print("📊 测试完成!")
+    print("=" * 60)
+    print(f"最终答案: {final_answer}")
+
+    # 显示完整对话历史
+    display_conversation(history)
+
+    return final_answer, history
+
+
+# 运行测试示例
+final_answer, history = test_basic_example()
