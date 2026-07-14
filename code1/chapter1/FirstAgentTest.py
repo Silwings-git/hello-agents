@@ -1,18 +1,29 @@
 import os
+from re import S
 
 from dotenv import load_dotenv
+from openai import OpenAI
+from regex import F
 from tavily import TavilyClient
+from openai.types.chat import ChatCompletionMessageParam
 import requests
 
 # 加载环境变量
 load_dotenv()
 
-# 配置API秘钥
-API_KEY = os.getenv("API_KEY")
-BASE_URL = os.getenv("BASE_URL")
-MODEL_ID = os.getenv("MODEL_ID")
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
+def _require_env(key: str) -> str:
+    value = os.getenv(key)
+    if value is None:
+        raise ValueError(f"缺少必需的环境变量: {key}")
+    return value
+
+
+# 配置API秘钥
+API_KEY = _require_env("API_KEY")
+BASE_URL = _require_env("BASE_URL")
+MODEL_ID = _require_env("MODEL_ID")
+TAVILY_API_KEY = _require_env("TAVILY_API_KEY")
 
 AGENT_SYSTEM_PROMPT = """
 你是一个智能旅行助手。你的任务是分析用户的请求，并使用可用工具一步步地解决问题。
@@ -109,3 +120,90 @@ def get_attraction(city: str, weather: str) -> str:
 
 # 将所有工具函数放入一个字典, 方便后续使用
 available_tools = {"get_weather": get_weather, "get_attraction": get_attraction}
+
+
+# OpenAI客户端
+class OpenAICompatibleClient:
+    """
+    一个用于调用任何兼容OpenAI接口的LLM服务的客户端
+    """
+
+    def __init__(self, model: str, api_key: str, base_url: str):
+        self.model = model
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+
+    def generate(self, prompt: str, system_prompt: str) -> str:
+        """
+        调用LLM API来生成回应
+        """
+        try:
+            messages: list[ChatCompletionMessageParam] = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ]
+            response = self.client.chat.completions.create(
+                model=self.model, messages=messages, stream=False
+            )
+            answer = response.choices[0].message.content
+            if answer is None:
+                print("大语言模型未响应content")
+                return "错误: 模型未返回文本内容"
+            print("大语言模型响应成功")
+            return answer
+        except Exception as e:
+            print(f"调用LLM API时发生错误: {e}")
+            return "错误: 调用大语言模型服务时出错"
+
+
+class TravelAssistant:
+    """
+    智能旅行助手类
+    """
+
+    def __init__(self):
+        self.llm = OpenAICompatibleClient(
+            model=MODEL_ID, api_key=API_KEY, base_url=BASE_URL
+        )
+        self.prompt_history = []
+
+    def reset(self):
+        """重置对话历史"""
+        self.prompt_history = []
+
+    def add_user_message(self, message: str):
+        """添加用户消息到历史"""
+        self.prompt_history.append(f"用户请求: {message}")
+
+    def add_assistant_message(self, message: str):
+        """添加助手消息到历史"""
+        self.prompt_history.append(message)
+
+    def add_observation(self, observation: str):
+        """添加观察结果到历史"""
+        self.prompt_history.append(f"Observation: {observation}")
+
+
+def display_conversation(history):
+    """美观的显示对话历史"""
+    print("\n" + "=" * 60)
+    print("📝 对话历史")
+    print("=" * 60)
+
+    for i, message in enumerate(history, 1):
+        if message.startswith("用户请求:"):
+            print(f"\n👤 用户 [{i}]: {message[5:]}")
+        elif message.startswith("Thought:"):
+            print(f"\n🤔 思考 [{i}]: {message[8:].strip()}")
+        elif message.startswith("Action:"):
+            print(f"🛠️  行动 [{i}]: {message[7:].strip()}")
+        elif message.startswith("Observation:"):
+            print(f"📊 观察 [{i}]: {message[12:].strip()}")
+        else:
+            print(f"💬 消息 [{i}]: {message}")
+
+    print("=" * 60 + "\n")
+
+def parse_action(action_str):
+    """解析行动字符串"""
+    if action_str.startswitch("Finish"):
+        
