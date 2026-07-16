@@ -1,11 +1,8 @@
-import math
 import os
-from re import S
 import re
 
 from dotenv import load_dotenv
 from openai import OpenAI
-from regex import F
 from tavily import TavilyClient
 from openai.types.chat import ChatCompletionMessageParam
 import requests
