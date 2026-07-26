@@ -141,8 +141,17 @@ class MyPlanAndSolveAgent(PlanAndSolveAgent):
             config,
             custom_prompts if custom_prompts else DEFAULT_PROMOTS,
         )
-        self.planner = Planner(self.llm)
-        self.executor = Executor(self.llm)
+
+        # 设置提示词模板：用户自定义优先，否则使用默认模板
+        if custom_prompts:
+            planner_prompt = custom_prompts.get("planner")
+            executor_prompt = custom_prompts.get("executor")
+        else:
+            planner_prompt = None
+            executor_prompt = None
+
+        self.planner = Planner(self.llm, planner_prompt)
+        self.executor = Executor(self.llm, executor_prompt)
 
     def run(self, input_text: str, **kwargs) -> str:
 
