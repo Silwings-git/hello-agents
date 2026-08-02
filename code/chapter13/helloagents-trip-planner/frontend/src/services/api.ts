@@ -40,7 +40,10 @@ apiClient.interceptors.response.use(
  */
 export async function generateTripPlan(formData: TripFormData): Promise<TripPlanResponse> {
   try {
-    const response = await apiClient.post<TripPlanResponse>('/api/trip/plan', formData)
+    // 规划接口耗时较长,单独放宽超时(10分钟),其他接口仍使用实例默认的2分钟
+    const response = await apiClient.post<TripPlanResponse>('/api/trip/plan', formData, {
+      timeout: 600000
+    })
     return response.data
   } catch (error: any) {
     console.error('生成旅行计划失败:', error)
